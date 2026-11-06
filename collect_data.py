@@ -15,13 +15,16 @@ Run on your laptop (needs internet):
     python collect_data.py --folder try2                 # all patients, 40 segments each
     python collect_data.py --folder try1 --cases 1000 --segs 20   # how try1 was made
 
-If it stops in the middle just run the same command again, finished parts are skipped.
+If it stops in the middle just run it again: patients that are already saved are skipped,
+even if you change --cases or --segs.
 """
 
 import argparse
+import glob
 import os
+import time
 import warnings
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
 import pandas as pd
@@ -160,7 +163,8 @@ def main():
     parser.add_argument("--folder", default="try2", help="saves into <folder>/data")
     parser.add_argument("--cases", type=int, default=0, help="number of patients, 0 = all")
     parser.add_argument("--segs", type=int, default=40, help="10-second segments per patient")
-    parser.add_argument("--workers", type=int, default=8, help="parallel downloads")
+    parser.add_argument("--workers", type=int, default=min(8, os.cpu_count() or 4),
+                        help="patients processed at the same time (one CPU core each)")
     args = parser.parse_args()
     out = os.path.join(args.folder, "data")
     os.makedirs(out, exist_ok=True)
@@ -172,36 +176,47 @@ def main():
     print("Chosen cases per class:", {RISK_NAMES[r]: int(n) for r, n in counts.sort_index().items()})
     print("Segments per case:", {RISK_NAMES[r]: args.segs * b for r, b in sorted(boost.items())})
 
-    n_parts = int(np.ceil(len(cases) / CASES_PER_PART))
+    # skip patients that were already saved by an earlier run
+    existing = sorted(glob.glob(os.path.join(out, "part_*.npz")))
+    done = set()
+    for f in existing:
+        done |= set(np.load(f)["caseid"].tolist())
+    todo = cases[~cases["caseid"].isin(done)].reset_index(drop=True)
+    first = max([int(os.path.basename(f)[5:8]) for f in existing], default=-1) + 1
+    n_parts = int(np.ceil(len(todo) / CASES_PER_PART))
+    print(f"Already saved: {len(done)} patients in {len(existing)} parts. To download: {len(todo)} patients "
+          f"({n_parts} parts, {args.workers} at a time)")
+
+    t_start = time.time()
     for p in range(n_parts):
-        path = os.path.join(out, f"part_{p:03d}.npz")
-        if os.path.exists(path):
-            print(f"[{p + 1}/{n_parts}] {path} already exists, skipping")
-            continue
-        chunk = cases.iloc[p * CASES_PER_PART:(p + 1) * CASES_PER_PART]
-        print(f"[{p + 1}/{n_parts}] downloading {len(chunk)} cases ...")
-        jobs = [(row.caseid, args.segs * boost[row.risk]) for row in chunk.itertuples()]
-        with ThreadPoolExecutor(args.workers) as ex:
-            results = list(ex.map(lambda j: process_case(*j), jobs))
+        path = os.path.join(out, f"part_{first + p:03d}.npz")
+        chunk = todo.iloc[p * CASES_PER_PART:(p + 1) * CASES_PER_PART]
+        print(f"[{p + 1}/{n_parts}] downloading {len(chunk)} cases ...", flush=True)
+        caseids = [int(c) for c in chunk["caseid"]]
+        n_segs = [args.segs * boost[r] for r in chunk["risk"]]
+        with ProcessPoolExecutor(args.workers) as ex:
+            results = list(ex.map(process_case, caseids, n_segs))
 
         cols = {k: [] for k in ["X", "sbp", "dbp", "t", "risk", "asa", "caseid", "subjectid"] + PATIENT_INFO}
         for (_, row), res in zip(chunk.iterrows(), results):
             if res is None:
                 continue
-            x, s, d, t = res
+            x, sb, db, t = res
             n = len(x)
-            cols["X"].append(x); cols["sbp"].append(s); cols["dbp"].append(d); cols["t"].append(t)
+            cols["X"].append(x); cols["sbp"].append(sb); cols["dbp"].append(db); cols["t"].append(t)
             for k in ["risk", "asa", "caseid", "subjectid"] + PATIENT_INFO:
                 cols[k].append(np.full(n, row[k]))
-        if not cols["X"]:
-            continue
-        arrays = {k: np.concatenate(v) for k, v in cols.items()}
-        for k in ["risk", "caseid", "subjectid"]:
-            arrays[k] = arrays[k].astype(np.int64)
-        for k in ["asa"] + PATIENT_INFO:
-            arrays[k] = arrays[k].astype(np.float32)
-        np.savez_compressed(path, **arrays)
-        print(f"   saved {path}: {len(arrays['X'])} segments, {os.path.getsize(path) / 1e6:.1f} MB")
+        if cols["X"]:
+            arrays = {k: np.concatenate(v) for k, v in cols.items()}
+            for k in ["risk", "caseid", "subjectid"]:
+                arrays[k] = arrays[k].astype(np.int64)
+            for k in ["asa"] + PATIENT_INFO:
+                arrays[k] = arrays[k].astype(np.float32)
+            np.savez_compressed(path, **arrays)
+            print(f"   saved {path}: {len(arrays['X'])} segments, {os.path.getsize(path) / 1e6:.1f} MB")
+        per_part = (time.time() - t_start) / (p + 1)
+        left = per_part * (n_parts - p - 1)
+        print(f"   {per_part / 60:.1f} min per part, about {left / 3600:.1f} hours left", flush=True)
 
     # summary of everything collected
     rows = []
