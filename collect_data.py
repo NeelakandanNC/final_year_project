@@ -2,19 +2,20 @@
 STEP 1 - Collect data from VitalDB
 
 Downloads PPG, ECG and arterial blood pressure (ART) from the open VitalDB
-dataset, cuts them into 10-second segments and saves them in the data/ folder.
+dataset, cuts them into 10-second segments and saves them in <folder>/data.
 
 For every segment we save:
-    X     -> PPG and ECG signals, shape (2, 1000)  (10 s at 100 Hz)
-    sbp   -> systolic BP  (mmHg)  from the arterial line   (BP label)
-    dbp   -> diastolic BP (mmHg)  from the arterial line   (BP label)
-    risk  -> 0 No risk, 1 Low, 2 Moderate, 3 High  from ASA status (risk label)
+    X       -> PPG and ECG signals, shape (2, 1000)  (10 s at 100 Hz)
+    sbp/dbp -> systolic / diastolic BP (mmHg) from the arterial line   (BP labels)
+    risk    -> 0 No risk, 1 Low, 2 Moderate, 3 High  from ASA status   (risk label)
+    age, sex, height, weight, bmi, emop, preop_htn, preop_dm  -> patient info
+    t       -> start time of the segment in the surgery (seconds)
 
-Run once on your laptop (needs internet):
-    pip install -r requirements.txt
-    python collect_data.py
+Run on your laptop (needs internet):
+    python collect_data.py --folder try2                 # all patients, 40 segments each
+    python collect_data.py --folder try1 --cases 1000 --segs 20   # how try1 was made
 
-If it stops in the middle just run it again, finished parts are skipped.
+If it stops in the middle just run the same command again, finished parts are skipped.
 """
 
 import argparse
@@ -33,7 +34,8 @@ FS = 100                  # sampling rate we save at (VitalDB is 500 Hz, we down
 SEG_LEN = 10 * FS         # 10 second segments
 TRACKS = ["SNUADC/PLETH", "SNUADC/ECG_II", "SNUADC/ART"]   # PPG, ECG, arterial BP
 RISK_NAMES = ["No risk", "Low risk", "Moderate risk", "High risk"]
-CASES_PER_PART = 100      # cases saved in each data/part_xxx.npz file
+PATIENT_INFO = ["age", "sex", "height", "weight", "bmi", "emop", "preop_htn", "preop_dm"]
+CASES_PER_PART = 100      # cases saved in each part_xxx.npz file
 
 
 def asa_to_risk(asa):
@@ -91,7 +93,7 @@ def good_segment(ppg, ecg, art):
 
 
 def process_case(caseid, n_segs):
-    """Download one case and return up to n_segs good segments."""
+    """Download one case and return up to n_segs good segments (in time order)."""
     try:
         data = vitaldb.load_case(caseid, TRACKS, 1 / FS)
     except Exception as e:
@@ -101,34 +103,45 @@ def process_case(caseid, n_segs):
         return None
 
     ppg, ecg, art = data[:, 0], data[:, 1], data[:, 2]
-    # try segments spread evenly over the surgery
-    starts = np.linspace(0, len(data) - SEG_LEN, n_segs * 5).astype(int)
-    X, sbp, dbp = [], [], []
+    # try non-overlapping windows spread evenly over the surgery
+    n_try = min(n_segs * 15, len(data) // SEG_LEN)
+    starts = np.linspace(0, len(data) - SEG_LEN, n_try).astype(int)
+    good = []
     for s in starts:
-        e = s + SEG_LEN
-        res = good_segment(ppg[s:e], ecg[s:e], art[s:e])
-        if res is None:
-            continue
-        X.append(np.stack([ppg[s:e], ecg[s:e]]))
-        sbp.append(res[0])
-        dbp.append(res[1])
-        if len(X) == n_segs:
-            break
-    if not X:
+        res = good_segment(ppg[s:s + SEG_LEN], ecg[s:s + SEG_LEN], art[s:s + SEG_LEN])
+        if res is not None:
+            good.append((s, res[0], res[1]))
+    if not good:
         return None
-    return np.array(X, dtype=np.float16), np.array(sbp, np.float32), np.array(dbp, np.float32)
+    # keep n_segs good segments spread over the whole surgery
+    keep = np.unique(np.linspace(0, len(good) - 1, min(n_segs, len(good))).astype(int))
+    X, sbp, dbp, t = [], [], [], []
+    for k in keep:
+        s, sb, db = good[k]
+        X.append(np.stack([ppg[s:s + SEG_LEN], ecg[s:s + SEG_LEN]]))
+        sbp.append(sb)
+        dbp.append(db)
+        t.append(s / FS)
+    return (np.array(X, dtype=np.float16), np.array(sbp, np.float32),
+            np.array(dbp, np.float32), np.array(t, np.float32))
 
 
 def choose_cases(n_cases, seed=42):
-    """Pick cases that have PPG + ECG + ART, trying to keep the 4 risk classes balanced."""
+    """Pick cases that have PPG + ECG + ART. n_cases=0 means all of them.
+    Otherwise try to keep the 4 risk classes balanced."""
     print("Reading VitalDB case list ...")
     caseids = vitaldb.find_cases(TRACKS)
     clinical = pd.read_csv(f"{vitaldb.dataset.api_url}/cases")
     clinical = clinical[clinical["caseid"].isin(caseids)].copy()
     clinical["risk"] = clinical["asa"].apply(asa_to_risk)
     clinical = clinical[clinical["risk"] >= 0]
+    clinical["sex"] = (clinical["sex"] == "M").astype(float)        # 1 = male, 0 = female
+    for col in PATIENT_INFO:
+        clinical[col] = pd.to_numeric(clinical[col], errors="coerce")
     print(f"{len(clinical)} cases have all 3 signals and an ASA score")
     print(clinical["risk"].value_counts().sort_index().rename(index=dict(enumerate(RISK_NAMES))))
+    if n_cases <= 0 or n_cases >= len(clinical):
+        return clinical.sort_values("caseid").reset_index(drop=True)
 
     # take an equal share from each class; small classes give all they have,
     # and what is left over goes to the bigger classes
@@ -144,12 +157,13 @@ def choose_cases(n_cases, seed=42):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--cases", type=int, default=1000, help="number of patients to download")
-    parser.add_argument("--segs", type=int, default=20, help="10-second segments per patient")
+    parser.add_argument("--folder", default="try2", help="saves into <folder>/data")
+    parser.add_argument("--cases", type=int, default=0, help="number of patients, 0 = all")
+    parser.add_argument("--segs", type=int, default=40, help="10-second segments per patient")
     parser.add_argument("--workers", type=int, default=8, help="parallel downloads")
-    parser.add_argument("--out", default="data")
     args = parser.parse_args()
-    os.makedirs(args.out, exist_ok=True)
+    out = os.path.join(args.folder, "data")
+    os.makedirs(out, exist_ok=True)
 
     cases = choose_cases(args.cases)
     # rare classes get more segments per patient so the classes are less unbalanced
@@ -158,48 +172,53 @@ def main():
     print("Chosen cases per class:", {RISK_NAMES[r]: int(n) for r, n in counts.sort_index().items()})
     print("Segments per case:", {RISK_NAMES[r]: args.segs * b for r, b in sorted(boost.items())})
 
-    summary = []
     n_parts = int(np.ceil(len(cases) / CASES_PER_PART))
     for p in range(n_parts):
-        path = os.path.join(args.out, f"part_{p:03d}.npz")
-        chunk = cases.iloc[p * CASES_PER_PART:(p + 1) * CASES_PER_PART]
+        path = os.path.join(out, f"part_{p:03d}.npz")
         if os.path.exists(path):
             print(f"[{p + 1}/{n_parts}] {path} already exists, skipping")
-            old = np.load(path)
-            for cid in np.unique(old["caseid"]):
-                m = old["caseid"] == cid
-                summary.append((cid, old["subjectid"][m][0], old["asa"][m][0], old["risk"][m][0], m.sum()))
             continue
-
+        chunk = cases.iloc[p * CASES_PER_PART:(p + 1) * CASES_PER_PART]
         print(f"[{p + 1}/{n_parts}] downloading {len(chunk)} cases ...")
         jobs = [(row.caseid, args.segs * boost[row.risk]) for row in chunk.itertuples()]
         with ThreadPoolExecutor(args.workers) as ex:
             results = list(ex.map(lambda j: process_case(*j), jobs))
 
-        X, sbp, dbp, risk, asa, cid, sid = [], [], [], [], [], [], []
-        for row, res in zip(chunk.itertuples(), results):
+        cols = {k: [] for k in ["X", "sbp", "dbp", "t", "risk", "asa", "caseid", "subjectid"] + PATIENT_INFO}
+        for (_, row), res in zip(chunk.iterrows(), results):
             if res is None:
                 continue
-            x, s, d = res
+            x, s, d, t = res
             n = len(x)
-            X.append(x); sbp.append(s); dbp.append(d)
-            risk += [row.risk] * n; asa += [row.asa] * n
-            cid += [row.caseid] * n; sid += [row.subjectid] * n
-            summary.append((row.caseid, row.subjectid, row.asa, row.risk, n))
-        if not X:
+            cols["X"].append(x); cols["sbp"].append(s); cols["dbp"].append(d); cols["t"].append(t)
+            for k in ["risk", "asa", "caseid", "subjectid"] + PATIENT_INFO:
+                cols[k].append(np.full(n, row[k]))
+        if not cols["X"]:
             continue
-        np.savez_compressed(path, X=np.concatenate(X), sbp=np.concatenate(sbp), dbp=np.concatenate(dbp),
-                            risk=np.array(risk, np.int64), asa=np.array(asa, np.float32),
-                            caseid=np.array(cid, np.int64), subjectid=np.array(sid, np.int64))
-        size = os.path.getsize(path) / 1e6
-        print(f"   saved {path}: {sum(len(x) for x in X)} segments, {size:.1f} MB")
+        arrays = {k: np.concatenate(v) for k, v in cols.items()}
+        for k in ["risk", "caseid", "subjectid"]:
+            arrays[k] = arrays[k].astype(np.int64)
+        for k in ["asa"] + PATIENT_INFO:
+            arrays[k] = arrays[k].astype(np.float32)
+        np.savez_compressed(path, **arrays)
+        print(f"   saved {path}: {len(arrays['X'])} segments, {os.path.getsize(path) / 1e6:.1f} MB")
 
-    df = pd.DataFrame(summary, columns=["caseid", "subjectid", "asa", "risk", "n_segments"])
-    df.to_csv(os.path.join(args.out, "cases.csv"), index=False)
+    # summary of everything collected
+    rows = []
+    for f in sorted(os.listdir(out)):
+        if f.startswith("part_") and f.endswith(".npz"):
+            d = np.load(os.path.join(out, f))
+            for cid in np.unique(d["caseid"]):
+                m = d["caseid"] == cid
+                rows.append({"caseid": cid, "subjectid": d["subjectid"][m][0], "asa": d["asa"][m][0],
+                             "risk": d["risk"][m][0], "n_segments": int(m.sum()),
+                             **{k: d[k][m][0] for k in PATIENT_INFO if k in d.files}})
+    df = pd.DataFrame(rows)
+    df.to_csv(os.path.join(out, "cases.csv"), index=False)
     print("\nDone.")
     print(f"Patients: {len(df)}   Segments: {df['n_segments'].sum()}")
-    print("Segments per risk class:")
-    print(df.groupby("risk")["n_segments"].sum().rename(index=dict(enumerate(RISK_NAMES))))
+    print(df.groupby("risk").agg(patients=("caseid", "count"), segments=("n_segments", "sum"))
+          .rename(index=dict(enumerate(RISK_NAMES))))
 
 
 if __name__ == "__main__":

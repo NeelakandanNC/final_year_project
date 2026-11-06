@@ -4,36 +4,45 @@ Final year project, B.Tech ECE, NIT Agartala.
 
 ```
 PPG + ECG  ──>  Model 1 (CNN)  ──>  Blood pressure (SBP / DBP)
-PPG + ECG + BP  ──>  Model 2 (CNN)  ──>  Cardiovascular risk (No / Low / Moderate / High)
+PPG + ECG + BP (+ age, sex, BMI)  ──>  Model 2 (CNN)  ──>  Cardiovascular risk (No / Low / Moderate / High)
 ```
 
 ## Files
 
-| File | What it does |
+| File / folder | What it is |
 |---|---|
-| `collect_data.py` | Step 1: downloads PPG, ECG and arterial BP from VitalDB into `data/` |
+| `collect_data.py` | Step 1: downloads PPG, ECG and arterial BP from VitalDB into `<try>/data/` |
 | `train_kaggle.ipynb` | Step 2: trains both models on Kaggle, saves a checkpoint every epoch |
-| `predict.py` | Step 3: loads the trained weights and predicts BP + risk |
+| `predict.py` | Step 3: loads trained weights and predicts BP + risk for one segment |
 | `models.py` | The two CNN models |
-| `data/` | Collected 10-second segments (`part_xxx.npz`) |
-| `weights/` | Final trained weights (`bp_cnn.pt`, `risk_cnn.pt`) |
+| `try1/`, `try2/` | One folder per experiment: `data/` (collected segments) and `weights/` (trained models + `results.txt`) |
 
 ## How to run
 
-**1. Collect data** (once, on a laptop with internet)
+**1. Collect data** (on a laptop with internet)
 ```
 pip install -r requirements.txt
-python collect_data.py
+python collect_data.py --folder try2
 ```
-Then push the `data/` folder to GitHub.
+Then push the `try2/data` folder to GitHub.
 
-**2. Train on Kaggle**: upload `train_kaggle.ipynb`, turn on GPU and Internet, Run All.
-Download `bp_cnn.pt` and `risk_cnn.pt` from `/kaggle/working/weights/` and push them into `weights/`.
+**2. Train on Kaggle**: upload `train_kaggle.ipynb`, set `TRY = "try2"`, turn on GPU and Internet, Run All.
+Download `bp_cnn.pt`, `risk_cnn.pt` and `results.txt` from `/kaggle/working/try2/weights/` and push them into `try2/weights/`.
 
 **3. Predict**
 ```
-python predict.py
+python predict.py --folder try2
 ```
+
+## Experiments
+
+| | try1 | try2 |
+|---|---|---|
+| Patients / segments | 772 / 8,034 | all patients, up to 40 segments each |
+| Risk model inputs | PPG + ECG + predicted BP | PPG + ECG + predicted BP + age, sex, BMI |
+| SBP MAE (guess-the-average baseline) | 16.5 mmHg (18.3) | |
+| DBP MAE (guess-the-average baseline) | 10.8 mmHg (12.3) | |
+| Risk accuracy, segments / patients | 32.4% / 29.2% (chance 25%) | |
 
 ## Data and labels
 
