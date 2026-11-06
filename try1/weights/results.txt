@@ -1,0 +1,8 @@
+BP model (test set)
+SBP: MAE 16.49 mmHg | ME 1.80 ± SD 21.87 mmHg | within 5/10/15 mmHg: 24% / 43% / 58%
+DBP: MAE 10.77 mmHg | ME -0.47 ± SD 13.74 mmHg | within 5/10/15 mmHg: 31% / 56% / 74%
+(AAMI standard: ME within ±5 mmHg and SD below 8 mmHg)
+
+Risk model (test set)
+Segment level: accuracy 32.4% | macro F1 0.283
+Patient level: accuracy 29.2% | macro F1 0.210
