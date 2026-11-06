@@ -38,11 +38,14 @@ python predict.py --folder try2
 
 | | try1 | try2 |
 |---|---|---|
-| Patients / segments | 772 / 8,034 | all patients, up to 40 segments each |
+| Patients / segments | 772 / 8,034 | 992 / 29,245 |
 | Risk model inputs | PPG + ECG + predicted BP | PPG + ECG + predicted BP + age, sex, BMI |
-| SBP MAE (guess-the-average baseline) | 16.5 mmHg (18.3) | |
-| DBP MAE (guess-the-average baseline) | 10.8 mmHg (12.3) | |
-| Risk accuracy, segments / patients | 32.4% / 29.2% (chance 25%) | |
+| SBP MAE (guess-the-average baseline) | 16.5 mmHg (18.3) | 15.7 mmHg (19.5) |
+| DBP MAE (guess-the-average baseline) | 10.8 mmHg (12.3) | 10.7 mmHg (12.3) |
+| Risk accuracy, segments / patients | 32.4% / 29.2% | 35.1% / 41.1% |
+| Risk macro F1, segments / patients | 0.283 / 0.210 | 0.317 / 0.350 |
+
+Random guessing for 4 risk classes = 25% accuracy. Full numbers are in each `weights/results.txt`.
 
 ## Data and labels
 
