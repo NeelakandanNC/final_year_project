@@ -1,0 +1,18 @@
+try2 results
+
+BP model (test set, new patients)
+Baseline (always guess the average BP):
+  SBP: MAE 19.51 mmHg | ME 4.83 ± SD 24.45 mmHg | within 5/10/15 mmHg: 18% / 33% / 48%
+  DBP: MAE 12.31 mmHg | ME 1.32 ± SD 15.48 mmHg | within 5/10/15 mmHg: 27% / 48% / 68%
+CNN, calibration-free:
+  SBP: MAE 15.70 mmHg | ME 0.54 ± SD 20.16 mmHg | within 5/10/15 mmHg: 22% / 42% / 57%
+  DBP: MAE 10.70 mmHg | ME -0.08 ± SD 13.71 mmHg | within 5/10/15 mmHg: 28% / 56% / 76%
+CNN, with one-point calibration per patient:
+  SBP: MAE 18.66 mmHg | ME -0.53 ± SD 24.22 mmHg | within 5/10/15 mmHg: 18% / 36% / 51%
+  DBP: MAE 11.88 mmHg | ME -0.46 ± SD 15.58 mmHg | within 5/10/15 mmHg: 31% / 54% / 69%
+(AAMI standard: ME within ±5 mmHg and SD below 8 mmHg)
+
+Risk model (test set), inputs: PPG + ECG + predicted BP + age, sex, BMI
+Segment level: accuracy 35.1% | macro F1 0.317
+Patient level: accuracy 41.1% | macro F1 0.350
+(random guessing = 25% accuracy)
