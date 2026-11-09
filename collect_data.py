@@ -10,8 +10,8 @@ For every segment we save:
     risk    -> 0 No risk, 1 Low, 2 Moderate, 3 High  from ASA status   (risk label)
     age, sex, height, weight, bmi, emop, preop_htn, preop_dm  -> patient info
     t       -> start time of the segment in the surgery (seconds)
-It also writes <folder>/data/clinical.csv: all VitalDB clinical information of the saved patients
-(pre-op lab values, pre-op ECG, department, surgery type, ...), one row per patient.
+It also writes <folder>/data/clinical.csv: all VitalDB clinical information (pre-op lab values,
+pre-op ECG, department, surgery type, ...), one row per patient.
 
 Run on your laptop (needs internet):
     python collect_data.py --folder try3 --cases 2000    # 2000 patients, balanced over the 4 classes
@@ -173,6 +173,7 @@ def main():
     os.makedirs(out, exist_ok=True)
 
     cases, clinical = choose_cases(args.cases)
+    clinical.to_csv(os.path.join(out, "clinical.csv"), index=False)     # clinical info, one row per patient
     # rare classes get more segments per patient so the classes are less unbalanced
     counts = cases["risk"].value_counts()
     boost = {r: int(min(4, max(1, round(counts.max() / counts[r])))) for r in counts.index}
@@ -233,7 +234,6 @@ def main():
                              **{k: d[k][m][0] for k in PATIENT_INFO if k in d.files}})
     df = pd.DataFrame(rows)
     df.to_csv(os.path.join(out, "cases.csv"), index=False)
-    clinical[clinical["caseid"].isin(df["caseid"])].to_csv(os.path.join(out, "clinical.csv"), index=False)
     print("\nDone.")
     print(f"Patients: {len(df)}   Segments: {df['n_segments'].sum()}")
     print(df.groupby("risk").agg(patients=("caseid", "count"), segments=("n_segments", "sum"))
