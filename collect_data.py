@@ -10,9 +10,12 @@ For every segment we save:
     risk    -> 0 No risk, 1 Low, 2 Moderate, 3 High  from ASA status   (risk label)
     age, sex, height, weight, bmi, emop, preop_htn, preop_dm  -> patient info
     t       -> start time of the segment in the surgery (seconds)
+It also writes <folder>/data/clinical.csv: all VitalDB clinical information of the saved patients
+(pre-op lab values, pre-op ECG, department, surgery type, ...), one row per patient.
 
 Run on your laptop (needs internet):
-    python collect_data.py --folder try2                 # all patients, 40 segments each
+    python collect_data.py --folder try3 --cases 2000    # 2000 patients, balanced over the 4 classes
+    python collect_data.py --folder try2 --cases 1500    # how try2 was made (stopped at 992 patients)
     python collect_data.py --folder try1 --cases 1000 --segs 20   # how try1 was made
 
 If it stops in the middle just run it again: patients that are already saved are skipped,
@@ -144,7 +147,7 @@ def choose_cases(n_cases, seed=42):
     print(f"{len(clinical)} cases have all 3 signals and an ASA score")
     print(clinical["risk"].value_counts().sort_index().rename(index=dict(enumerate(RISK_NAMES))))
     if n_cases <= 0 or n_cases >= len(clinical):
-        return clinical.sort_values("caseid").reset_index(drop=True)
+        return clinical.sort_values("caseid").reset_index(drop=True), clinical
 
     # take an equal share from each class; small classes give all they have,
     # and what is left over goes to the bigger classes
@@ -155,7 +158,7 @@ def choose_cases(n_cases, seed=42):
         take = min(len(groups[r]), left // (len(order) - i))
         picked.append(groups[r].iloc[:take])
         left -= take
-    return pd.concat(picked).sort_values("caseid").reset_index(drop=True)
+    return pd.concat(picked).sort_values("caseid").reset_index(drop=True), clinical
 
 
 def main():
@@ -169,7 +172,7 @@ def main():
     out = os.path.join(args.folder, "data")
     os.makedirs(out, exist_ok=True)
 
-    cases = choose_cases(args.cases)
+    cases, clinical = choose_cases(args.cases)
     # rare classes get more segments per patient so the classes are less unbalanced
     counts = cases["risk"].value_counts()
     boost = {r: int(min(4, max(1, round(counts.max() / counts[r])))) for r in counts.index}
@@ -230,6 +233,7 @@ def main():
                              **{k: d[k][m][0] for k in PATIENT_INFO if k in d.files}})
     df = pd.DataFrame(rows)
     df.to_csv(os.path.join(out, "cases.csv"), index=False)
+    clinical[clinical["caseid"].isin(df["caseid"])].to_csv(os.path.join(out, "clinical.csv"), index=False)
     print("\nDone.")
     print(f"Patients: {len(df)}   Segments: {df['n_segments'].sum()}")
     print(df.groupby("risk").agg(patients=("caseid", "count"), segments=("n_segments", "sum"))

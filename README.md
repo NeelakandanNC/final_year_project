@@ -3,8 +3,8 @@
 Final year project, B.Tech ECE, NIT Agartala.
 
 ```
-PPG + ECG  ──>  Model 1 (CNN)  ──>  Blood pressure (SBP / DBP)
-PPG + ECG + BP (+ age, sex, BMI)  ──>  Model 2 (CNN)  ──>  Cardiovascular risk (No / Low / Moderate / High)
+PPG + ECG (+ age, sex, BMI)  ──>  Model 1 (RNN / CNN)  ──>  Blood pressure (SBP / DBP)
+PPG + ECG + BP + patient info  ──>  Model 2 (RNN / CNN)  ──>  Cardiovascular risk (No / Low / Moderate / High)
 ```
 
 ## Files
@@ -14,7 +14,7 @@ PPG + ECG + BP (+ age, sex, BMI)  ──>  Model 2 (CNN)  ──>  Cardiovascula
 | `collect_data.py` | Step 1: downloads PPG, ECG and arterial BP from VitalDB into `<try>/data/` |
 | `train_kaggle.ipynb` | Step 2: trains both models on Kaggle, saves a checkpoint every epoch |
 | `predict.py` | Step 3: loads trained weights and predicts BP + risk for one segment |
-| `models.py` | The two CNN models |
+| `models.py` | The two models; the signal part is an RNN (GRU or LSTM) or a 1D CNN |
 | `try1/`, `try2/` | One folder per experiment: `data/` (collected segments) and `weights/` (trained models + `results.txt`) |
 
 ## How to run
@@ -22,30 +22,44 @@ PPG + ECG + BP (+ age, sex, BMI)  ──>  Model 2 (CNN)  ──>  Cardiovascula
 **1. Collect data** (on a laptop with internet)
 ```
 pip install -r requirements.txt
-python collect_data.py --folder try2
+python collect_data.py --folder try3 --cases 2000
 ```
-Then push the `try2/data` folder to GitHub.
+Then push the `try3/data` folder to GitHub.
 
-**2. Train on Kaggle**: upload `train_kaggle.ipynb`, set `TRY = "try2"`, turn on GPU and Internet, Run All.
-Download `bp_cnn.pt`, `risk_cnn.pt` and `results.txt` from `/kaggle/working/try2/weights/` and push them into `try2/weights/`.
+**2. Train on Kaggle**: upload `train_kaggle.ipynb`, check `TRY`, `DATA` and `ARCH` in the settings cell, turn on GPU and Internet, Save & Run All.
+Download everything in `/kaggle/working/<TRY>/weights/` and push it into `<TRY>/weights/`.
 
 **3. Predict**
 ```
-python predict.py --folder try2
+python predict.py --folder try3
 ```
 
 ## Experiments
 
-| | try1 | try2 |
-|---|---|---|
-| Patients / segments | 772 / 8,034 | 992 / 29,245 |
-| Risk model inputs | PPG + ECG + predicted BP | PPG + ECG + predicted BP + age, sex, BMI |
-| SBP MAE (guess-the-average baseline) | 16.5 mmHg (18.3) | 15.7 mmHg (19.5) |
-| DBP MAE (guess-the-average baseline) | 10.8 mmHg (12.3) | 10.7 mmHg (12.3) |
-| Risk accuracy, segments / patients | 32.4% / 29.2% | 35.1% / 41.1% |
-| Risk macro F1, segments / patients | 0.283 / 0.210 | 0.317 / 0.350 |
+| | try1 | try2 | try3 | try4 |
+|---|---|---|---|---|
+| Signal model | CNN | CNN | RNN (GRU) | RNN (LSTM) |
+| Patients / segments | 772 / 8,034 | 992 / 29,245 | try3 data | try3 data |
+| Risk model inputs | PPG + ECG + predicted BP | + age, sex, BMI | + all pre-op clinical info | + all pre-op clinical info |
+| SBP MAE (guess-the-average baseline) | 16.5 mmHg (18.3) | 15.7 mmHg (19.5) | | |
+| DBP MAE (guess-the-average baseline) | 10.8 mmHg (12.3) | 10.7 mmHg (12.3) | | |
+| Risk accuracy, segments / patients | 32.4% / 29.2% | 35.1% / 41.1% | | |
+| Risk macro F1, segments / patients | 0.283 / 0.210 | 0.317 / 0.350 | | |
 
 Random guessing for 4 risk classes = 25% accuracy. Full numbers are in each `weights/results.txt`.
+
+**Quick model test on try2 data** (BP model, 10 segments per patient, 15 epochs, same test patients):
+
+| Model | Parameters | SBP MAE | DBP MAE |
+|---|---|---|---|
+| Guess the average | – | 19.41 | 12.37 |
+| RNN, GRU | 445k | 16.78 | 10.80 |
+| RNN, LSTM | 582k | 16.93 | 10.86 |
+| CNN, ReLU | 196k | 16.18 | 10.38 |
+| CNN, SiLU | 196k | 16.50 | 10.42 |
+| CNN, GELU | 196k | 16.64 | 10.37 |
+
+Patient information alone (age, sex, BMI, emergency surgery, hypertension, diabetes, gradient boosting, 5-fold) predicts the risk class with about 50% accuracy on the try2 patients.
 
 ## Data and labels
 
