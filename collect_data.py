@@ -98,13 +98,24 @@ def good_segment(ppg, ecg, art):
     return sbp, dbp
 
 
+def with_retry(fn, what, tries=4):
+    """VitalDB's server sometimes drops connections: wait and try again (15 s, 30 s, 45 s)."""
+    for attempt in range(tries):
+        try:
+            return fn()
+        except Exception as e:
+            if attempt == tries - 1:
+                print(f"  {what}: failed after {tries} tries ({e})", flush=True)
+                raise
+            time.sleep(15 * (attempt + 1))
+
+
 def process_case(caseid, n_segs):
     """Download one case and return up to n_segs good segments (in time order)."""
     try:
-        data = vitaldb.load_case(caseid, TRACKS, 1 / FS)
-    except Exception as e:
-        print(f"  case {caseid}: download failed ({e})")
-        return None
+        data = with_retry(lambda: vitaldb.load_case(caseid, TRACKS, 1 / FS), f"case {caseid}")
+    except Exception:
+        return None     # skipped for now, a later run tries this patient again
     if data is None or len(data) < SEG_LEN * 10:
         return None
 
@@ -132,18 +143,23 @@ def process_case(caseid, n_segs):
             np.array(dbp, np.float32), np.array(t, np.float32))
 
 
-def choose_cases(n_cases, seed=42):
+def choose_cases(n_cases, out, seed=42):
     """Pick cases that have PPG + ECG + ART. n_cases=0 means all of them.
     Otherwise try to keep the 4 risk classes balanced."""
-    print("Reading VitalDB case list ...")
-    caseids = vitaldb.find_cases(TRACKS)
-    clinical = pd.read_csv(f"{vitaldb.dataset.api_url}/cases")
-    clinical = clinical[clinical["caseid"].isin(caseids)].copy()
-    clinical["risk"] = clinical["asa"].apply(asa_to_risk)
-    clinical = clinical[clinical["risk"] >= 0]
-    clinical["sex"] = (clinical["sex"] == "M").astype(float)        # 1 = male, 0 = female
-    for col in PATIENT_INFO:
-        clinical[col] = pd.to_numeric(clinical[col], errors="coerce")
+    saved = os.path.join(out, "clinical.csv")
+    if os.path.exists(saved):                       # list from an earlier run, no download needed
+        print(f"Reading case list from {saved}")
+        clinical = pd.read_csv(saved)
+    else:
+        print("Reading VitalDB case list ...")
+        caseids = with_retry(lambda: vitaldb.find_cases(TRACKS), "case list")
+        clinical = with_retry(lambda: pd.read_csv(f"{vitaldb.dataset.api_url}/cases"), "clinical table")
+        clinical = clinical[clinical["caseid"].isin(caseids)].copy()
+        clinical["risk"] = clinical["asa"].apply(asa_to_risk)
+        clinical = clinical[clinical["risk"] >= 0]
+        clinical["sex"] = (clinical["sex"] == "M").astype(float)        # 1 = male, 0 = female
+        for col in PATIENT_INFO:
+            clinical[col] = pd.to_numeric(clinical[col], errors="coerce")
     print(f"{len(clinical)} cases have all 3 signals and an ASA score")
     print(clinical["risk"].value_counts().sort_index().rename(index=dict(enumerate(RISK_NAMES))))
     if n_cases <= 0 or n_cases >= len(clinical):
@@ -166,13 +182,13 @@ def main():
     parser.add_argument("--folder", default="try2", help="saves into <folder>/data")
     parser.add_argument("--cases", type=int, default=0, help="number of patients, 0 = all")
     parser.add_argument("--segs", type=int, default=40, help="10-second segments per patient")
-    parser.add_argument("--workers", type=int, default=min(8, os.cpu_count() or 4),
-                        help="patients processed at the same time (one CPU core each)")
+    parser.add_argument("--workers", type=int, default=4,
+                        help="patients downloaded at the same time (more = faster, but VitalDB may block you)")
     args = parser.parse_args()
     out = os.path.join(args.folder, "data")
     os.makedirs(out, exist_ok=True)
 
-    cases, clinical = choose_cases(args.cases)
+    cases, clinical = choose_cases(args.cases, out)
     clinical.to_csv(os.path.join(out, "clinical.csv"), index=False)     # clinical info, one row per patient
     # rare classes get more segments per patient so the classes are less unbalanced
     counts = cases["risk"].value_counts()
