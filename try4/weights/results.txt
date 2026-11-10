@@ -1,0 +1,16 @@
+try4 results  (data: try3, model: lstm, activation: relu)
+
+BP model (test set, new patients)
+Baseline (always guess the average BP):
+  SBP: MAE 18.12 mmHg | ME -0.95 ± SD 22.64 mmHg | within 5/10/15 mmHg: 16% / 33% / 49%
+  DBP: MAE 11.29 mmHg | ME -0.80 ± SD 14.30 mmHg | within 5/10/15 mmHg: 28% / 53% / 72%
+LSTM model:
+  SBP: MAE 15.33 mmHg | ME -0.54 ± SD 19.59 mmHg | within 5/10/15 mmHg: 22% / 41% / 57%
+  DBP: MAE 9.12 mmHg | ME -1.09 ± SD 12.00 mmHg | within 5/10/15 mmHg: 38% / 64% / 81%
+(AAMI standard: ME within ±5 mmHg and SD below 8 mmHg)
+
+Risk model (test set), inputs: PPG + ECG + predicted BP + all pre-op clinical info
+  Segment level : accuracy 54.3% | macro F1 0.435 | within one class 90.1% | per class (No/Low/Mod/High) 63% / 51% / 54% / 7%
+  Patient level : accuracy 55.0% | macro F1 0.450 | within one class 92.4% | per class (No/Low/Mod/High) 56% / 58% / 50% / 33%
+  Patient info only, no signals (gradient boosting): accuracy 61.8% | macro F1 0.526 | within one class 95.8% | per class (No/Low/Mod/High) 68% / 62% / 53% / 33%
+(random guessing = 25% accuracy; 'within one class' counts Low vs Moderate etc. as close)

@@ -1,0 +1,16 @@
+try3 results  (data: try3, model: gru, activation: relu)
+
+BP model (test set, new patients)
+Baseline (always guess the average BP):
+  SBP: MAE 18.12 mmHg | ME -0.95 ± SD 22.64 mmHg | within 5/10/15 mmHg: 16% / 33% / 49%
+  DBP: MAE 11.29 mmHg | ME -0.80 ± SD 14.30 mmHg | within 5/10/15 mmHg: 28% / 53% / 72%
+GRU model:
+  SBP: MAE 14.84 mmHg | ME -0.54 ± SD 19.12 mmHg | within 5/10/15 mmHg: 22% / 43% / 60%
+  DBP: MAE 9.40 mmHg | ME -0.78 ± SD 12.23 mmHg | within 5/10/15 mmHg: 35% / 62% / 80%
+(AAMI standard: ME within ±5 mmHg and SD below 8 mmHg)
+
+Risk model (test set), inputs: PPG + ECG + predicted BP + all pre-op clinical info
+  Segment level : accuracy 53.1% | macro F1 0.431 | within one class 89.2% | per class (No/Low/Mod/High) 65% / 49% / 49% / 11%
+  Patient level : accuracy 54.2% | macro F1 0.456 | within one class 91.6% | per class (No/Low/Mod/High) 59% / 57% / 43% / 67%
+  Patient info only, no signals (gradient boosting): accuracy 61.8% | macro F1 0.526 | within one class 95.8% | per class (No/Low/Mod/High) 68% / 62% / 53% / 33%
+(random guessing = 25% accuracy; 'within one class' counts Low vs Moderate etc. as close)
