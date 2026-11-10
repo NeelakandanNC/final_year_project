@@ -1,0 +1,134 @@
+BLOOD PRESSURE AND CARDIOVASCULAR RISK FROM PPG + ECG
+Summary of all experiments (try1 - try4)
+=====================================================================
+
+1. WHAT THE PROJECT DOES
+---------------------------------------------------------------------
+Model 1 (BP model)   : 10 s of PPG + ECG (+ age, sex, BMI)  -> systolic and diastolic BP
+Model 2 (risk model) : PPG + ECG + predicted BP + patient info -> 4 risk classes
+
+Data   : VitalDB (open dataset of surgical patients, Seoul National University Hospital)
+Signals: PPG (SNUADC/PLETH), ECG lead II (SNUADC/ECG_II), arterial line BP (SNUADC/ART), 100 Hz
+BP label  : SBP / DBP measured by the arterial line in the same 10 seconds
+Risk label: ASA physical status, assigned by the anaesthetist before surgery
+            ASA 1 = No risk, ASA 2 = Low, ASA 3 = Moderate, ASA 4+ = High
+
+All results are on TEST patients that the model never saw during training
+(train / validation / test = 70 / 15 / 15 %, split by patient).
+
+
+2. THE FOUR EXPERIMENTS
+---------------------------------------------------------------------
+        Patients  Segments  Signal model   Risk model inputs
+try1       772      8,034   CNN            PPG + ECG + predicted BP
+try2       992     29,245   CNN            + age, sex, BMI
+try3     1,746     55,504   RNN (GRU)      + all pre-op clinical info (lab values, pre-op ECG,
+                                             lung test, hypertension, diabetes, department,
+                                             surgery type, emergency)
+try4     same data as try3  RNN (LSTM)     same as try3
+
+Other changes from try3: AdamW + OneCycle learning rate, gradient clipping, data
+augmentation (noise + time shift), label smoothing, early stopping, BP model also gets
+age / sex / BMI, risk model reuses the BP model's signal features (frozen).
+
+
+3. MODEL 1: BLOOD PRESSURE
+---------------------------------------------------------------------
+MAE = average error in mmHg (lower is better).
+Baseline = always guessing the average BP of the training patients.
+A model is only useful if it beats this baseline.
+
+                 SBP MAE   baseline   DBP MAE   baseline   SBP within 15   DBP within 15
+try1 (CNN)        16.5       18.3      10.8       12.3         58%             74%
+try2 (CNN)        15.7       19.5      10.7       12.3         57%             76%
+try3 (GRU)        14.8       18.1       9.4       11.3         60%             80%
+try4 (LSTM)       15.3       18.1       9.1       11.3         57%             81%
+
+What this means
+- Every model beats the baseline. Best: try3 (GRU) for SBP, try4 (LSTM) for DBP.
+- GRU and LSTM perform about the same. More data helped more than the choice of network.
+- Quick test on try2 data (10 segments per patient, 15 epochs, same test patients):
+
+      Model           Parameters   SBP MAE   DBP MAE
+      Guess average        -        19.41     12.37
+      RNN, GRU           445k       16.78     10.80
+      RNN, LSTM          582k       16.93     10.86
+      CNN, ReLU          196k       16.18     10.38
+      CNN, SiLU          196k       16.50     10.42
+      CNN, GELU          196k       16.64     10.37
+
+  The CNN was about 0.6 mmHg better than the RNNs, and the activation functions
+  ReLU / GELU / SiLU gave the same results (within 0.5 mmHg).
+- The error spread (SD) is about 19 mmHg for SBP and 12 mmHg for DBP. The AAMI
+  standard for medical BP devices needs SD below 8 mmHg, so the model is not yet
+  clinical grade. This is expected for "calibration-free" BP: the model has never
+  seen the test patient and gets no cuff reading from them.
+- A one-point calibration (using each patient's first segment as a known reading)
+  was tried in try2 and made results worse, because the first segment is at the
+  start of surgery when BP changes a lot.
+
+
+4. MODEL 2: CARDIOVASCULAR RISK (4 classes)
+---------------------------------------------------------------------
+Accuracy = % of patients put in exactly the right class. Random guessing = 25%.
+Within one class = right class or the neighbouring one (e.g. Low vs Moderate).
+Patient level = average of all 10 s segments of a patient (this is the main number).
+
+                          Accuracy   Macro F1   Within one class
+try1 (CNN, signals only)     29%       0.21           -
+try2 (CNN, + age/sex/BMI)    41%       0.35           -
+try3 (GRU, + clinical)       54%       0.46          92%
+try4 (LSTM, + clinical)      55%       0.45          92%
+Clinical info only, no signals (gradient boosting, same test patients):
+                             62%       0.53          96%
+
+Per class, try4 (No / Low / Moderate / High): 56% / 58% / 50% / 33%
+Only about 6 High-risk patients are in the test set, so the High-risk number is not reliable
+(the whole VitalDB dataset has only 38-39 High-risk patients with all three signals).
+
+
+5. WHY THE RISK MODEL STOPS AT ABOUT 65%
+---------------------------------------------------------------------
+Extra tests on the 1,746 try3 patients (5-fold cross validation, gradient boosting):
+
+      Inputs                                                       Accuracy   Within one class
+      Age, sex, BMI, emergency, hypertension, diabetes               52.9%        91.1%
+   A. All pre-op clinical info                                       63.2%        96.3%
+   B. A + pre-op blood gas values                                    63.6%        96.6%
+   C. B + diagnosis and operation name (text)                        62.9%        96.8%
+   D. C + 1,633 extra VitalDB patients for training                  64.5%        98.1%
+   F. B + heart rate, heart rate variability, PPG amplitude          64.0%        96.4%
+   G. F + the TRUE measured BP (best possible BP model)              63.6%        96.7%
+
+What this means
+- Every way of improving the inputs ends at 63-65%. Even giving the model the
+  real measured blood pressure does not help.
+- So the limit is the label, not the model. ASA is a judgement made by the
+  anaesthetist from the patient's history, and different anaesthetists do not
+  always agree on it. A model cannot be much more accurate than the label it learns.
+- PPG and ECG signals carry almost no information about ASA class beyond what
+  the clinical data already contains. The signals are useful for BP (model 1),
+  but the risk prediction is driven by clinical information.
+- The model is rarely far off: 92-98% of patients are in the right class or the
+  one next to it.
+
+
+6. CONCLUSIONS
+---------------------------------------------------------------------
+1. Blood pressure from PPG + ECG works and beats the baseline (best SBP error 14.8 mmHg,
+   DBP 9.1 mmHg), but it is not accurate enough for clinical use without calibration.
+2. Risk class (ASA, 4 classes): about 55% with the deep learning model and 62-65%
+   with clinical information alone, against 25% for random guessing. 75% was not
+   reached; the tests above show that this is a limit of the ASA label in this data.
+3. More data helped both models (try1 -> try3). The choice of CNN / GRU / LSTM and
+   of the activation function made little difference.
+
+Limitations
+- All patients are surgical patients with an arterial line, who are sicker than average.
+- Very few High-risk (ASA 4+) patients.
+- Only one hospital (Seoul National University Hospital).
+
+Files
+- <try>/weights/results.txt : full numbers of each experiment
+- <try>/weights/*.pt        : trained models (try3/try4 also have config.json)
+- python predict.py --folder try3 : demo prediction on one segment
