@@ -97,8 +97,8 @@ Extra tests on the 1,746 try3 patients (5-fold cross validation, gradient boosti
    B. A + pre-op blood gas values                                    63.6%        96.6%
    C. B + diagnosis and operation name (text)                        62.9%        96.8%
    D. C + 1,633 extra VitalDB patients for training                  64.5%        98.1%
-   F. B + heart rate, heart rate variability, PPG amplitude          64.0%        96.4%
-   G. F + the TRUE measured BP (best possible BP model)              63.6%        96.7%
+   E. B + heart rate, heart rate variability, PPG amplitude          64.0%        96.4%
+   F. E + the TRUE measured BP (best possible BP model)              63.6%        96.7%
 
 What this means
 - Every way of improving the inputs ends at 63-65%. Even giving the model the
